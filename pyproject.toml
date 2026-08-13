@@ -1,0 +1,18 @@
+[build-system]
+requires = ["setuptools>=61.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "tg-media-downloader"
+version = "0.1.0"
+description = "Headless daemon tailing Telegram channels and saving media"
+authors = [{ name = "dmitry" }]
+requires-python = ">=3.10"
+dependencies = [
+    "telethon>=1.30.0",
+    "aiofiles>=23.0.0",
+    "prometheus-client>=0.17.0",
+]
+
+[project.scripts]
+tg-media-downloader = "tg_media_downloader.cli:main"
