@@ -22,3 +22,14 @@ def test_extension_filtering_case_insensitive():
     assert f.allow(bad) is False
 
 
+def test_size_boundaries():
+    # 1MB min, 10MB max
+    f = MediaFilter(allowed_extensions=[], min_bytes=1024 * 1024, max_bytes=10 * 1024 * 1024)
+    
+    tiny = SimpleNamespace(file_name="doc.pdf", file_size=500, mime_type="application/pdf")
+    just_right = SimpleNamespace(file_name="doc.pdf", file_size=2 * 1024 * 1024, mime_type="application/pdf")
+    too_big = SimpleNamespace(file_name="doc.pdf", file_size=15 * 1024 * 1024, mime_type="application/pdf")
+    
+    assert f.allow(tiny) is False
+    assert f.allow(just_right) is True
+    assert f.allow(too_big) is False
