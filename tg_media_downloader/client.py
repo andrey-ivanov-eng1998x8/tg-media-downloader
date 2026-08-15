@@ -1,7 +1,8 @@
+import asyncio
 import logging
 from typing import Optional
 from telethon import TelegramClient, events
-from telethon.errors import ChannelPrivateError
+from telethon.errors import FloodWaitError, ChannelPrivateError
 from telethon.tl.types import (
     MessageMediaDocument,
     MessageMediaPhoto,
@@ -13,7 +14,7 @@ from telethon.tl.types import (
 from tg_media_downloader.config import Config
 from tg_media_downloader.queue import QueueStorage
 from tg_media_downloader.filters import should_download
-from tg_media_downloader.metrics import MESSAGES_SEEN, MEDIA_ENQUEUED
+from tg_media_downloader.metrics import MESSAGES_SEEN, MEDIA_ENQUEUED, FLOOD_WAIT_SECONDS
 
 log = logging.getLogger(__name__)
 
@@ -59,6 +60,8 @@ class TelegramMonitor:
 
         await self._resolve_channels()
         self._register_handlers()
+        if self.cfg.catchup_limit > 0:
+            await self.catch_up(self.cfg.catchup_limit)
 
     async def _resolve_channels(self) -> None:
         self._target_entities = []
@@ -78,6 +81,7 @@ class TelegramMonitor:
             log.warning("no valid channel targets to listen on")
             return
 
+        # FIXME: telethon drops channel cache on reconnection cycle, might need a periodic refresh
         @self.client.on(events.NewMessage(chats=self._target_entities))
         async def on_new_message(event: events.NewMessage.Event):
             msg = event.message
@@ -107,6 +111,39 @@ class TelegramMonitor:
                 file_name=filename,
             )
             MEDIA_ENQUEUED.labels(channel=chan_title, media_type=media_type).inc()
+
+    async def catch_up(self, limit: int = 50) -> None:
+        log.info(f"running startup catch-up (limit={limit} msgs/channel)")
+        for ent in self._target_entities:
+            chan_title = getattr(ent, "title", str(ent.id))
+            try:
+                async for msg in self.client.iter_messages(ent, limit=limit):
+                    if not msg.media:
+                        continue
+                    if self.queue.exists(ent.id, msg.id):
+                        continue
+                    if not should_download(msg, self.cfg):
+                        continue
+
+                    m_type = _classify_media(msg.media)
+                    fn = _extract_filename(msg.media)
+                    sz = getattr(msg.file, "size", 0) if msg.file else 0
+                    self.queue.enqueue(
+                        channel_id=ent.id,
+                        channel_name=chan_title,
+                        message_id=msg.id,
+                        media_type=m_type,
+                        file_size=sz,
+                        file_name=fn,
+                    )
+                    MEDIA_ENQUEUED.labels(channel=chan_title, media_type=m_type).inc()
+            except FloodWaitError as e:
+                FLOOD_WAIT_SECONDS.set(e.seconds)
+                log.warning(f"flood wait hit during catch-up: sleeping {e.seconds}s")
+                await asyncio.sleep(e.seconds)
+                FLOOD_WAIT_SECONDS.set(0)
+            except Exception as e:
+                log.error(f"catch-up failed on {chan_title}: {e}")
 
     async def run_until_disconnected(self) -> None:
         await self.client.run_until_disconnected()

@@ -33,3 +33,20 @@ def test_size_boundaries():
     assert f.allow(tiny) is False
     assert f.allow(just_right) is True
     assert f.allow(too_big) is False
+
+
+def test_mime_fallback_when_filename_is_missing():
+    # TG voice notes and some stickers have no file_name attribute set
+    f = MediaFilter(allowed_extensions=["ogg"], min_bytes=0, max_bytes=0)
+    voice = SimpleNamespace(file_name=None, file_size=12000, mime_type="audio/ogg")
+    sticker = SimpleNamespace(file_name=None, file_size=8000, mime_type="image/webp")
+    
+    assert f.allow(voice) is True
+    assert f.allow(sticker) is False
+
+
+def test_zero_file_size_skipped():
+    f = MediaFilter(allowed_extensions=[], min_bytes=0, max_bytes=0)
+    empty = SimpleNamespace(file_name="zero.txt", file_size=0, mime_type="text/plain")
+    # print(f"debug: {empty}")
+    assert f.allow(empty) is False

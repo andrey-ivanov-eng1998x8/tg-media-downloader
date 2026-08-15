@@ -1,5 +1,5 @@
 import logging
-from prometheus_client import Counter, Gauge, start_http_server
+from prometheus_client import Counter, Gauge, Histogram, start_http_server
 
 log = logging.getLogger(__name__)
 
@@ -28,9 +28,24 @@ DOWNLOAD_FAILURES = Counter(
     "Failed download attempts",
     ["channel", "reason"],
 )
+
 QUEUE_DEPTH = Gauge(
     "tg_queue_depth",
     "Current pending tasks in sqlite queue",
+)
+ACTIVE_DOWNLOADS = Gauge(
+    "tg_active_downloads",
+    "Currently running chunk download workers",
+)
+FLOOD_WAIT_SECONDS = Gauge(
+    "tg_flood_wait_seconds",
+    "Active Telegram flood wait penalty in seconds",
+)
+
+CHUNK_LATENCY = Histogram(
+    "tg_chunk_download_seconds",
+    "Time spent fetching a single MTProto file chunk",
+    buckets=[0.05, 0.1, 0.25, 0.5, 1.0, 2.5, 5.0, 10.0],
 )
 
 

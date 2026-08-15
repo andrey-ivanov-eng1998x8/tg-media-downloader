@@ -27,3 +27,15 @@ def test_enqueue_and_fetch_pending(queue):
     assert items[0].status == ItemStatus.PENDING
 
 
+def test_state_transitions(queue):
+    queue.enqueue(-100, 10, "pic.jpg", 1024, "image/jpeg")
+    item = queue.fetch_pending(limit=1)[0]
+    
+    queue.mark_running(item.id)
+    # should not be returned as pending now
+    assert len(queue.fetch_pending(limit=1)) == 0
+    
+    queue.mark_completed(item.id, local_path="/tmp/pic.jpg")
+    done_item = queue.get_by_id(item.id)
+    assert done_item.status == ItemStatus.COMPLETED
+    assert done_item.local_path == "/tmp/pic.jpg"

@@ -5,6 +5,8 @@ from typing import Optional, Dict, Any
 
 
 class Queue:
+    """Job store backed by SQLite with minimal state transitions."""
+
     def __init__(self, db_path: str | Path):
         self.db_path = str(db_path)
         self._init_db()
@@ -12,8 +14,10 @@ class Queue:
     def _get_conn(self) -> sqlite3.Connection:
         conn = sqlite3.connect(self.db_path, timeout=30.0)
         conn.row_factory = sqlite3.Row
+        # WAL mode is mandatory here, otherwise concurrent reads from prometheus lock writes
         conn.execute("PRAGMA journal_mode=WAL")
         conn.execute("PRAGMA synchronous=NORMAL")
+        conn.execute("PRAGMA busy_timeout=5000")
         return conn
 
     def _init_db(self):
@@ -41,6 +45,29 @@ class Queue:
             conn.execute(
                 "CREATE INDEX IF NOT EXISTS idx_jobs_file_uniq ON download_jobs(file_unique_id)"
             )
+
+    def reset_stuck_jobs(self, lease_seconds: int = 600) -> int:
+        cutoff = time.time() - lease_seconds
+        with self._get_conn() as conn:
+            cur = conn.execute(
+                """
+                UPDATE download_jobs
+                SET status = 'pending', updated_at = ?
+                WHERE status = 'downloading' AND updated_at < ?
+                """,
+                (time.time(), cutoff),
+            )
+            return cur.rowcount
+
+    def is_known_file(self, file_unique_id: str) -> bool:
+        if not file_unique_id:
+            return False
+        with self._get_conn() as conn:
+            cur = conn.execute(
+                "SELECT 1 FROM download_jobs WHERE file_unique_id = ? AND status = 'done' LIMIT 1",
+                (file_unique_id,),
+            )
+            return cur.fetchone() is not None
 
     def enqueue(
         self,
@@ -74,13 +101,12 @@ class Queue:
                 )
                 return True
         except sqlite3.IntegrityError:
-            # Already queued or downloaded
+            # print(f"duplicate skip: {channel_id}/{message_id}")
             return False
 
     def fetch_next(self) -> Optional[Dict[str, Any]]:
         with self._get_conn() as conn:
             cursor = conn.cursor()
-            # Grab oldest pending job
             cursor.execute(
                 """
                 SELECT * FROM download_jobs
@@ -104,7 +130,6 @@ class Queue:
                 (now, job_id),
             )
             if cursor.rowcount == 0:
-                # Raced with another worker
                 return None
 
             return dict(row)
@@ -131,6 +156,7 @@ class Queue:
             row = cursor.fetchone()
             attempts = (row["attempts"] if row else 0) + 1
 
+            # FIXME: backoff delay before re-queueing instead of immediate pending
             new_status = "pending" if attempts < max_retries else "failed"
             cursor.execute(
                 """

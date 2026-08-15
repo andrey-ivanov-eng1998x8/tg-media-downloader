@@ -20,6 +20,7 @@ class Config:
     metrics_port: int = 9100
     media_types: List[str] = field(default_factory=lambda: ["photo", "video", "document"])
     max_file_size_mb: int = 2000
+    skip_noforwards: bool = True
 
 
 def _validate_raw(raw: dict[str, Any]) -> None:
@@ -27,6 +28,12 @@ def _validate_raw(raw: dict[str, Any]) -> None:
         raise ValueError("Missing 'api_id' in config")
     if "api_hash" not in raw:
         raise ValueError("Missing 'api_hash' in config")
+    
+    try:
+        int(raw["api_id"])
+    except (ValueError, TypeError):
+        raise ValueError("'api_id' must be an integer")
+
     if not raw.get("channels"):
         raise ValueError("At least one channel must be specified in 'channels'")
 
@@ -43,9 +50,10 @@ def load_config(path: Union[str, Path, None] = None) -> Config:
     with open(path, "r", encoding="utf-8") as f:
         raw = json.load(f)
 
+    # print("DEBUG config raw:", raw)
     _validate_raw(raw)
 
-    # cast raw channel entries: IDs might come as strings from json
+    # channels can be '@handle', '-1001234567890' string, or raw int
     normalized_channels: List[Union[str, int]] = []
     for ch in raw.get("channels", []):
         if isinstance(ch, str) and ch.lstrip("-").isdigit():
@@ -53,10 +61,11 @@ def load_config(path: Union[str, Path, None] = None) -> Config:
         else:
             normalized_channels.append(ch)
 
+    # FIXME: allow overriding telegram session path separately from local dir
     return Config(
         api_id=int(raw["api_id"]),
         api_hash=str(raw["api_hash"]),
-        session_name=raw.get("session_name", "tg_daemon"),
+        session_name=str(raw.get("session_name", "tg_daemon")),
         channels=normalized_channels,
         download_dir=Path(raw.get("download_dir", "./downloads")),
         db_path=Path(raw.get("db_path", "./queue.sqlite3")),
@@ -66,4 +75,5 @@ def load_config(path: Union[str, Path, None] = None) -> Config:
         metrics_port=int(raw.get("metrics_port", 9100)),
         media_types=raw.get("media_types", ["photo", "video", "document"]),
         max_file_size_mb=int(raw.get("max_file_size_mb", 2000)),
+        skip_noforwards=bool(raw.get("skip_noforwards", True)),
     )
