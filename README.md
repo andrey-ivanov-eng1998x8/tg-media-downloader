@@ -51,3 +51,5 @@ python -m tg_media_downloader --config config.json
 ## License
 
 MIT
+
+<!-- refreshed: 2026-09-08 -->
