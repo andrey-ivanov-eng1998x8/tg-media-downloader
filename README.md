@@ -52,4 +52,4 @@ python -m tg_media_downloader --config config.json
 
 MIT
 
-<!-- refreshed: 2026-10-03 -->
+<!-- refreshed: 2026-10-04 -->
